@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>P2P Chat</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0d12;
+    --surface: #16161f;
+    --surface2: #1e1e2a;
+    --surface3: #252533;
+    --border: #2a2a3a;
+    --accent: #6c63ff;
+    --accent-dim: rgba(108,99,255,.15);
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,.15);
+    --red: #ef4444;
+    --red-dim: rgba(239,68,68,.15);
+    --amber: #f59e0b;
+    --text: #e4e4f0;
+    --text2: #7070a0;
+    --text3: #454560;
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ─── SVG ICONS ──────────────────────────────────────────────────────── */
+  .icon { display: block; flex-shrink: 0; }
+
+  /* ─── LOBBY ──────────────────────────────────────────────────────────── */
+  #lobby {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100%; gap: 20px; padding: 24px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 1.5rem; font-weight: 700; letter-spacing: -.5px;
+  }
+  .brand-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: var(--accent); display: flex; align-items: center; justify-content: center;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    width: 100%; max-width: 400px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .card-title { font-size: .8rem; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; }
+  .id-row {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .id-text { flex: 1; font-family: monospace; font-size: .95rem; color: var(--accent); word-break: break-all; }
+  .status-row { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+  .dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.error  { background: var(--red); }
+
+  input[type="text"] {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+    color: var(--text); font-size: .9rem; width: 100%; outline: none;
+    transition: border-color .2s;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder { color: var(--text3); }
+
+  .btn {
+    cursor: pointer; border: none; border-radius: var(--radius-sm);
+    font-size: .9rem; font-weight: 600; display: flex; align-items: center;
+    justify-content: center; gap: 8px; transition: opacity .15s, filter .15s;
+  }
+  .btn:active { filter: brightness(.88); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn-primary { background: var(--accent); color: #fff; padding: 13px; width: 100%; }
+  .btn-icon-sm {
+    background: transparent; color: var(--text2); padding: 6px;
+    border-radius: 6px; cursor: pointer; border: none;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, color .15s;
+  }
+  .btn-icon-sm:hover { background: var(--surface3); color: var(--text); }
+
+  /* ─── APP SHELL ──────────────────────────────────────────────────────── */
+  #app { display: none; flex-direction: column; height: 100%; }
+
+  /* topbar */
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent-dim); border: 1px solid var(--accent);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .peer-info { flex: 1; min-width: 0; }
+  .peer-name { font-weight: 600; font-size: .9rem; }
+  .peer-sub  { font-size: .72rem; color: var(--text2); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* call action buttons in topbar (idle state) */
+  .topbar-actions { display: flex; gap: 6px; }
+  .action-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, transform .1s;
+  }
+  .action-btn:active { transform: scale(.93); }
+  .action-btn.green { background: var(--green-dim); color: var(--green); }
+  .action-btn.green:hover { background: var(--green); color: #fff; }
+  .action-btn.slate { background: var(--surface2); color: var(--text2); }
+  .action-btn.slate:hover { background: var(--surface3); color: var(--text); }
+  .action-btn.red   { background: var(--red-dim); color: var(--red); }
+  .action-btn.red:hover { background: var(--red); color: #fff; }
+  .action-btn.active-accent { background: var(--accent-dim); color: var(--accent); }
+  .action-btn.muted { background: var(--red-dim); color: var(--red); }
+
+  /* ─── BODY ───────────────────────────────────────────────────────────── */
+  .app-body { display: flex; flex: 1; overflow: hidden; }
+
+  /* video panel */
+  #video-panel {
+    display: none; flex-direction: column;
+    width: 320px; flex-shrink: 0;
+    background: #000; border-right: 1px solid var(--border);
+    position: relative;
+  }
+  #video-panel.visible { display: flex; }
+  #remote-video { flex: 1; object-fit: cover; width: 100%; background: #0a0a0a; }
+  #local-video {
+    position: absolute; bottom: 80px; right: 10px;
+    width: 90px; height: 68px; object-fit: cover;
+    border-radius: 8px; border: 2px solid var(--accent); background: #111;
+  }
+  .video-label {
+    position: absolute; top: 10px; left: 10px;
+    font-size: .7rem; color: rgba(255,255,255,.55);
+    background: rgba(0,0,0,.55); padding: 3px 8px; border-radius: 4px;
+    backdrop-filter: blur(4px);
+  }
+
+  /* floating call bar (shown during active call, inside video panel) */
+  .call-bar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 12px 16px;
+    background: linear-gradient(to top, rgba(0,0,0,.85), transparent);
+    backdrop-filter: blur(2px);
+  }
+  .call-bar-btn {
+    width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s, background .15s;
+    flex-shrink: 0;
+  }
+  .call-bar-btn:active { transform: scale(.9); }
+  .call-bar-btn.normal  { background: rgba(255,255,255,.12); color: #fff; }
+  .call-bar-btn.normal:hover { background: rgba(255,255,255,.22); }
+  .call-bar-btn.muted   { background: var(--red); color: #fff; }
+  .call-bar-btn.cam-off { background: var(--red); color: #fff; }
+  .call-bar-btn.end     { background: var(--red); color: #fff; width: 52px; height: 52px; }
+  .call-bar-btn.end:hover { background: #c53030; }
+
+  /* ─── CHAT ───────────────────────────────────────────────────────────── */
+  .chat-panel { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+  #messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth;
+  }
+  #messages::-webkit-scrollbar { width: 3px; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .msg { display: flex; flex-direction: column; max-width: 74%; }
+  .msg.mine   { align-self: flex-end;   align-items: flex-end; }
+  .msg.theirs { align-self: flex-start; align-items: flex-start; }
+
+  .bubble {
+    padding: 9px 13px; border-radius: 16px;
+    font-size: .875rem; line-height: 1.55; word-break: break-word;
+  }
+  .mine .bubble   { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .theirs .bubble { background: var(--surface2); color: var(--text); border-bottom-left-radius: 4px; }
+  .msg-time { font-size: .68rem; color: var(--text3); margin-top: 3px; padding: 0 3px; }
+
+  /* file bubble */
+  .file-bubble {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 13px; border-radius: 12px;
+    background: var(--surface2); border: 1px solid var(--border); max-width: 240px;
+  }
+  .mine .file-bubble { border-color: rgba(108,99,255,.3); }
+  .file-icon-wrap {
+    width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0;
+    background: var(--surface3); display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+  }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-size { font-size: .7rem; color: var(--text2); margin-top: 1px; }
+  .file-dl   { font-size: .78rem; color: var(--accent); text-decoration: none; display: inline-flex; align-items: center; gap: 3px; margin-top: 3px; }
+  .file-dl:hover { text-decoration: underline; }
+
+  .system-msg {
+    align-self: center; font-size: .75rem; color: var(--text3);
+    background: var(--surface2); border: 1px solid var(--border);
+    padding: 4px 12px; border-radius: 20px; margin: 4px 0;
+  }
+
+  /* input bar */
+  .input-bar {
+    padding: 10px 12px; background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; align-items: flex-end; gap: 8px;
+  }
+  #msg-input {
+    flex: 1; resize: none; max-height: 120px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 13px; color: var(--text); font-size: .875rem; font-family: inherit;
+    outline: none; line-height: 1.45; transition: border-color .2s; overflow-y: auto;
+  }
+  #msg-input:focus { border-color: var(--accent); }
+  #msg-input::placeholder { color: var(--text3); }
+  #file-input { display: none; }
+
+  .input-action {
+    width: 38px; height: 38px; border-radius: 9px; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s;
+    flex-shrink: 0;
+  }
+  .input-action.attach { background: var(--surface2); color: var(--text2); }
+  .input-action.attach:hover { background: var(--surface3); color: var(--text); }
+  .input-action.send   { background: var(--accent); color: #fff; }
+  .input-action.send:hover { filter: brightness(1.1); }
+
+  /* ─── TOAST ──────────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 72px; left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 9px 18px; font-size: .82rem;
+    opacity: 0; transition: opacity .25s, transform .25s;
+    pointer-events: none; white-space: nowrap; z-index: 99;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ─── INCOMING CALL MODAL ────────────────────────────────────────────── */
+  #call-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.75); z-index: 50;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  #call-modal.visible { display: flex; }
+  .call-modal-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 20px; padding: 32px 28px; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 16px; min-width: 270px;
+  }
+  .call-modal-avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--accent-dim); border: 2px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(108,99,255,.4); }
+    50%       { box-shadow: 0 0 0 12px rgba(108,99,255,0); }
+  }
+  .call-modal-name  { font-weight: 700; font-size: 1.05rem; }
+  .call-modal-label { font-size: .82rem; color: var(--text2); }
+  .call-modal-actions { display: flex; gap: 28px; margin-top: 4px; }
+  .call-fab {
+    width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s, filter .15s; flex-direction: column; gap: 4px;
+  }
+  .call-fab:active { transform: scale(.9); }
+  .call-fab.accept { background: var(--green); color: #fff; }
+  .call-fab.accept:hover { filter: brightness(1.1); }
+  .call-fab.decline { background: var(--red); color: #fff; }
+  .call-fab.decline:hover { filter: brightness(1.1); }
+  .call-fab-label { font-size: .68rem; color: var(--text2); font-weight: 500; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<!-- ══ LOBBY ══════════════════════════════════════════════════════════════ -->
+<div id="lobby">
+  <div class="brand">
+    <div class="brand-icon">
+      <!-- chat bubble icon -->
+      <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </div>
+    P2PChat
+  </div>
+
+  <div class="card">
+    <div class="card-title">Your ID</div>
+    <div class="id-row">
+      <span class="id-text" id="my-id">Connecting…</span>
+      <button class="btn-icon-sm" onclick="copyId()" title="Copy ID">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+      </button>
+    </div>
+    <div class="status-row">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-txt">Connecting to PeerJS…</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Connect</div>
+    <input id="peer-input" type="text" placeholder="Enter peer ID…" />
+    <button class="btn btn-primary" id="connect-btn" onclick="connectToPeer()" disabled>
+      <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+      </svg>
+      Connect
+    </button>
+  </div>
+</div>
+
+<!-- ══ APP ════════════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- topbar -->
+  <div class="topbar">
+    <div class="avatar">
+      <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+    </div>
+    <div class="peer-info">
+      <div class="peer-name">Connected</div>
+      <div class="peer-sub" id="connected-peer-id"></div>
+    </div>
+    <div class="topbar-actions">
+      <!-- start call (idle) -->
+      <button class="action-btn green" id="btn-call" title="Start call" onclick="startCall()">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- body -->
+  <div class="app-body">
+
+    <!-- video panel -->
+    <div id="video-panel">
+      <span class="video-label">Remote</span>
+      <video id="remote-video" autoplay playsinline></video>
+      <video id="local-video"  autoplay playsinline muted></video>
+
+      <!-- floating call controls -->
+      <div class="call-bar">
+        <!-- mute -->
+        <button class="call-bar-btn normal" id="btn-mute" title="Mute" onclick="toggleMute()">
+          <svg id="ico-mic" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+
+        <!-- end call — centre, bigger -->
+        <button class="call-bar-btn end" id="btn-hangup" title="End call" onclick="hangUp()">
+          <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.44-3.41m-5.33-5.35a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/>
+            <line x1="23" y1="1" x2="1" y2="23"/>
+          </svg>
+        </button>
+
+        <!-- camera toggle -->
+        <button class="call-bar-btn normal" id="btn-cam" title="Toggle camera" onclick="toggleCamera()">
+          <svg id="ico-cam" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- chat -->
+    <div class="chat-panel">
+      <div id="messages">
+        <div class="system-msg">🔒 End-to-end encrypted via WebRTC</div>
+      </div>
+
+      <div class="input-bar">
+        <button class="input-action attach" title="Attach file" onclick="document.getElementById('file-input').click()">
+          <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+          </svg>
+        </button>
+        <input type="file" id="file-input" onchange="sendFile(this)" multiple />
+
+        <textarea id="msg-input" rows="1" placeholder="Type a message…"
+          oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+
+        <button class="input-action send" title="Send" onclick="sendMessage()">
+          <svg class="icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ INCOMING CALL MODAL ═══════════════════════════════════════════════ -->
+<div id="call-modal">
+  <div class="call-modal-card">
+    <div class="call-modal-avatar">
+      <svg class="icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </svg>
+    </div>
+    <div>
+      <div class="call-modal-name">Incoming call</div>
+      <div class="call-modal-label" id="call-modal-from">from peer</div>
+    </div>
+    <div class="call-modal-actions">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <button class="call-fab decline" onclick="rejectCall()">
+          <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.44-3.41m-5.33-5.35a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/>
+            <line x1="23" y1="1" x2="1" y2="23"/>
+          </svg>
+        </button>
+        <span class="call-fab-label">Decline</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <button class="call-fab accept" onclick="answerCall()">
+          <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13.1a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.62 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+        </button>
+        <span class="call-fab-label">Answer</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── STATE ──────────────────────────────────────────────────────────────────
+let peer, conn, activeCall, localStream;
+let muted = false, cameraOff = false;
+let pendingCall = null;
+const fileChunks = {};
+
+// ─── ICONS (SVG strings for dynamic swap) ────────────────────────────────────
+const ICO = {
+  mic: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  micOff: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`,
+  cam: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`,
+  camOff: `<svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
+  file: `<svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+  download: `<svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
+};
+
+// ─── PEER INIT ───────────────────────────────────────────────────────────────
+function initPeer() {
+  peer = new Peer({ debug: 0 });
+
+  peer.on('open', id => {
+    document.getElementById('my-id').textContent = id;
+    document.getElementById('status-dot').classList.add('online');
+    document.getElementById('status-txt').textContent = 'Ready to connect';
+    document.getElementById('connect-btn').disabled = false;
+  });
+
+  peer.on('error', err => {
+    document.getElementById('status-dot').classList.add('error');
+    document.getElementById('status-txt').textContent = err.type || 'Error';
+    showToast('⚠️ ' + err.message);
+  });
+
+  peer.on('connection', c => {
+    if (conn) { c.close(); return; }
+    conn = c;
+    setupDataChannel();
+    showApp();
+  });
+
+  peer.on('call', call => {
+    pendingCall = call;
+    document.getElementById('call-modal-from').textContent = call.peer;
+    document.getElementById('call-modal').classList.add('visible');
+    startRingtone();
+  });
+}
+
+// ─── LOBBY ───────────────────────────────────────────────────────────────────
+function connectToPeer() {
+  const id = document.getElementById('peer-input').value.trim();
+  if (!id) return;
+  conn = peer.connect(id, { reliable: true });
+  setupDataChannel();
+}
+
+function setupDataChannel() {
+  conn.on('open', () => {
+    document.getElementById('connected-peer-id').textContent = conn.peer;
+    showApp();
+  });
+  conn.on('data', data => {
+    if      (data.type === 'msg')        receiveMessage(data);
+    else if (data.type === 'file-meta')  receiveFileMeta(data);
+    else if (data.type === 'file-chunk') receiveFileChunk(data);
+    else if (data.type === 'file-done')  receiveFileDone(data);
+  });
+  conn.on('close', () => { appendSystem('Peer disconnected'); hangUp(); });
+  conn.on('error', err => showToast('Connection error: ' + err.message));
+}
+
+function showApp() {
+  document.getElementById('lobby').style.display = 'none';
+  document.getElementById('app').style.display   = 'flex';
+}
+
+function copyId() {
+  navigator.clipboard.writeText(document.getElementById('my-id').textContent)
+    .then(() => showToast('ID copied to clipboard'));
+}
+
+// ─── CHAT ────────────────────────────────────────────────────────────────────
+function sendMessage() {
+  const inp  = document.getElementById('msg-input');
+  const text = inp.value.trim();
+  if (!text || !conn?.open) return;
+  const msg = { type: 'msg', text, ts: Date.now() };
+  conn.send(msg);
+  appendMessage(text, true, msg.ts);
+  inp.value = '';
+  inp.style.height = '';
+}
+
+function receiveMessage({ text, ts }) { appendMessage(text, false, ts); }
+
+function appendMessage(text, mine, ts) {
+  const wrap   = el('div', 'msg ' + (mine ? 'mine' : 'theirs'));
+  const bubble = el('div', 'bubble');
+  bubble.textContent = text;
+  const time = el('div', 'msg-time');
+  time.textContent = fmt(ts);
+  wrap.append(bubble, time);
+  msgs().appendChild(wrap);
+  scrollBottom();
+}
+
+function appendSystem(txt) {
+  const d = el('div', 'system-msg');
+  d.textContent = txt;
+  msgs().appendChild(d);
+  scrollBottom();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ─── FILE SHARING ────────────────────────────────────────────────────────────
+const CHUNK = 64 * 1024;
+
+function sendFile(input) {
+  Array.from(input.files).forEach(sendOneFile);
+  input.value = '';
+}
+
+function sendOneFile(file) {
+  if (!conn?.open) return;
+  const id = rand();
+  conn.send({ type: 'file-meta', id, name: file.name, size: file.size, mime: file.type });
+  const reader = new FileReader();
+  let offset = 0;
+  const next = () => reader.readAsArrayBuffer(file.slice(offset, offset + CHUNK));
+  reader.onload = e => {
+    conn.send({ type: 'file-chunk', id, data: e.target.result });
+    offset += e.target.result.byteLength;
+    if (offset < file.size) next();
+    else { conn.send({ type: 'file-done', id }); appendFileBubble(file.name, file.size, null, true); }
+  };
+  next();
+}
+
+function receiveFileMeta({ id, name, size, mime }) { fileChunks[id] = { name, size, mime, chunks: [] }; }
+function receiveFileChunk({ id, data }) { fileChunks[id]?.chunks.push(data); }
+function receiveFileDone({ id }) {
+  const info = fileChunks[id]; if (!info) return;
+  const url = URL.createObjectURL(new Blob(info.chunks, { type: info.mime }));
+  appendFileBubble(info.name, info.size, url, false);
+  delete fileChunks[id];
+}
+
+function appendFileBubble(name, size, url, mine) {
+  const wrap   = el('div', 'msg ' + (mine ? 'mine' : 'theirs'));
+  const bubble = el('div', 'file-bubble');
+  const iconWrap = el('div', 'file-icon-wrap');
+  iconWrap.innerHTML = ICO.file;
+  const info = el('div', 'file-info');
+  info.innerHTML = `
+    <div class="file-name">${esc(name)}</div>
+    <div class="file-size">${fmtSize(size)}</div>
+    ${url ? `<a class="file-dl" href="${url}" download="${esc(name)}">${ICO.download} Download</a>` : '<div class="file-size">Sending…</div>'}`;
+  bubble.append(iconWrap, info);
+  wrap.appendChild(bubble);
+  msgs().appendChild(wrap);
+  scrollBottom();
+}
+
+// ─── CALL ────────────────────────────────────────────────────────────────────
+async function startCall() {
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    document.getElementById('local-video').srcObject = localStream;
+    activeCall = peer.call(conn.peer, localStream);
+    setupCallHandlers(activeCall);
+    showCallUI(true);
+    appendSystem('Call started');
+  } catch { showToast('Camera / mic access denied'); }
+}
+
+async function answerCall() {
+  stopRingtone();
+  document.getElementById('call-modal').classList.remove('visible');
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    document.getElementById('local-video').srcObject = localStream;
+    pendingCall.answer(localStream);
+    activeCall = pendingCall;
+    setupCallHandlers(activeCall);
+    showCallUI(true);
+    appendSystem('Call answered');
+  } catch { showToast('Camera / mic access denied'); }
+  pendingCall = null;
+}
+
+function rejectCall() {
+  stopRingtone();
+  document.getElementById('call-modal').classList.remove('visible');
+  if (pendingCall) { pendingCall.close(); pendingCall = null; }
+  appendSystem('Call declined');
+}
+
+function setupCallHandlers(call) {
+  call.on('stream', s => { document.getElementById('remote-video').srcObject = s; });
+  call.on('close',  () => { appendSystem('Call ended'); showCallUI(false); });
+  call.on('error',  err => { showToast('Call error: ' + err.message); showCallUI(false); });
+}
+
+function hangUp() {
+  if (activeCall) { activeCall.close(); activeCall = null; }
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  document.getElementById('local-video').srcObject  = null;
+  document.getElementById('remote-video').srcObject = null;
+  showCallUI(false);
+  appendSystem('Call ended');
+}
+
+function showCallUI(active) {
+  document.getElementById('video-panel').classList.toggle('visible', active);
+  document.getElementById('btn-call').style.display = active ? 'none' : 'flex';
+  if (!active) { muted = false; cameraOff = false; syncMuteUI(); syncCamUI(); }
+}
+
+function toggleMute() {
+  if (!localStream) return;
+  muted = !muted;
+  localStream.getAudioTracks().forEach(t => t.enabled = !muted);
+  syncMuteUI();
+}
+
+function syncMuteUI() {
+  const btn = document.getElementById('btn-mute');
+  btn.innerHTML = muted ? ICO.micOff : ICO.mic;
+  btn.className = 'call-bar-btn ' + (muted ? 'muted' : 'normal');
+  btn.title = muted ? 'Unmute' : 'Mute';
+}
+
+function toggleCamera() {
+  if (!localStream) return;
+  cameraOff = !cameraOff;
+  localStream.getVideoTracks().forEach(t => t.enabled = !cameraOff);
+  syncCamUI();
+}
+
+function syncCamUI() {
+  const btn = document.getElementById('btn-cam');
+  btn.innerHTML = cameraOff ? ICO.camOff : ICO.cam;
+  btn.className = 'call-bar-btn ' + (cameraOff ? 'cam-off' : 'normal');
+  btn.title = cameraOff ? 'Turn on camera' : 'Turn off camera';
+}
+
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const msgs      = () => document.getElementById('messages');
+const scrollBottom = () => { const m = msgs(); m.scrollTop = m.scrollHeight; };
+const el        = (tag, cls) => { const e = document.createElement(tag); e.className = cls; return e; };
+const rand      = () => Math.random().toString(36).slice(2);
+const fmt       = ts => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtSize   = b => b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(1) + ' KB' : (b/1048576).toFixed(1) + ' MB';
+const esc       = s => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+// ─── RINGTONE (Web Audio API — no external files) ────────────────────────────
+let ringCtx = null, ringInterval = null;
+
+function startRingtone() {
+  stopRingtone(); // clear any previous
+  // Browsers require a user gesture before AudioContext can run.
+  // The incoming-call modal is shown after user interaction (the call button),
+  // so this is safe. We create a fresh context each time.
+  ringCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Classic double-ring pattern: ring ring … pause … ring ring …
+  // Each "ring" = 440 Hz + 480 Hz mixed for ~0.4 s, gap 0.2 s, pause 2 s
+  let step = 0;
+  const pattern = [
+    { dur: 0.4, on: true  },   // ring 1
+    { dur: 0.2, on: false },   // gap
+    { dur: 0.4, on: true  },   // ring 2
+    { dur: 2.0, on: false },   // pause
+  ];
+
+  function playStep() {
+    const { dur, on } = pattern[step % pattern.length];
+    if (on && ringCtx) {
+      const gain = ringCtx.createGain();
+      gain.gain.setValueAtTime(0, ringCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.18, ringCtx.currentTime + 0.01);
+      gain.gain.linearRampToValueAtTime(0.18, ringCtx.currentTime + dur - 0.02);
+      gain.gain.linearRampToValueAtTime(0,    ringCtx.currentTime + dur);
+      gain.connect(ringCtx.destination);
+
+      [440, 480].forEach(freq => {
+        const osc = ringCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        osc.start(ringCtx.currentTime);
+        osc.stop(ringCtx.currentTime + dur);
+      });
+    }
+    step++;
+    ringInterval = setTimeout(playStep, dur * 1000);
+  }
+
+  playStep();
+}
+
+function stopRingtone() {
+  clearTimeout(ringInterval);
+  ringInterval = null;
+  if (ringCtx) { ringCtx.close().catch(() => {}); ringCtx = null; }
+}
+
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+initPeer();
+</script>
+</body>
+</html>
